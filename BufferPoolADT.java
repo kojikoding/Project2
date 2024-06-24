@@ -7,6 +7,6 @@ public interface BufferPoolADT {
      * @param block
      * @return
      */
-    Buffer acquireBuffer(int block);
+    Buffer acquireBuffer();
 
 }

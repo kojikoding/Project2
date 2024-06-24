@@ -9,122 +9,115 @@ import java.io.IOException;
 
 public class HeapSort {
 
-    private BufferPool bufferPool;
+    private BufferPool pool;
 
-    public HeapSort(BufferPool bufferPool) {
-        this.bufferPool = bufferPool;
+    public HeapSort(BufferPool pool) {
+        this.pool = pool;
     }
 
-    public static void main(String[] args) throws IOException {
+
+    public static void main(String[] args) {
+
         if (args.length != 3) {
-            System.err.println("Usage: java HeapSort <data-file-name> <num-buffers> <stat-file-name>");
+            System.err.println("Incorrect Paramaters");
             System.exit(1);
         }
 
         String dataFileName = args[0];
-        int numBuffers = Integer.parseInt(args[1]);
+        int buffNum = Integer.parseInt(args[1]);
         String statFileName = args[2];
 
         File dataFile = new File(dataFileName);
-        BufferPool bufferPool = new BufferPool(numBuffers, dataFile);
-        HeapSort heapSort = new HeapSort(bufferPool);
+        BufferPool pool = new BufferPool(dataFile);
+        HeapSort heapSort = new HeapSort(pool);
 
-        long startTime = System.currentTimeMillis();
+        long sTime = System.currentTimeMillis();
         heapSort.sort();
-        long endTime = System.currentTimeMillis();
-
-        bufferPool.flush();
-        heapSort.writeStatistics(statFileName, dataFileName, endTime - startTime);
+        long eTime = System.currentTimeMillis();
+        
+        pool.flush();
+        heapSort.writeStatistics(statFileName, dataFileName, eTime - sTime);
         heapSort.printStatistics(statFileName);
+
     }
 
-    public void sort() throws IOException {
-        long fileSize = bufferPool.getFileSize();
-        int numRecords = (int) (fileSize / 4);
-        System.out.println("Number of records: " + numRecords);
 
-        // Step 1: Build the heap
-        for (int i = numRecords / 2 - 1; i >= 0; i--) {
-            System.out.println("Building heap: heapifying at index " + i);
-            heapify(numRecords, i);
+    public void sort() {
+        Buffer buffer = pool.acquireBuffer();
+        byte[] data = buffer.getDataPointer();
+        int numRec = data.length / 4;
+        
+       // System.out.println("Data before sorting:");
+        printData(data);
+
+        // Heap
+        for (int i = numRec / 2 - 1; i >= 0; i--) {
+            heapify(data, numRec, i);
         }
 
-        // Step 2: Extract elements from the heap one by one
-        for (int i = numRecords - 1; i >= 0; i--) {
-            System.out.println("Extracting element: swapping index 0 and " + i);
-            swap(0, i);
-            heapify(i, 0);
+        // extract
+        for (int i = numRec - 1; i >= 0; i--) {
+
+            swap(data, 0, i);
+            heapify(data, i , 0);
+        }
+        
+        buffer.markDirty();
+
+        //System.out.println("Data after sorting:");
+        printData(data);
+    }
+    
+    private void heapify(byte[] data, int n, int i)
+    {
+        while (true) {
+            int largest = i;
+            int left = 2 * i + 1;
+            int right = 2 * i + 2;
+
+            if (left < n && getKey(data, left) > getKey(data, largest)) {
+                largest = left;
+            }
+
+            if (right < n && getKey(data, right) > getKey(data, largest)) {
+                largest = right;
+            }
+
+            if (largest == i) {
+                break;
+            }
+
+            swap(data, i, largest);
+            i = largest;
         }
     }
-
-    private void heapify(int n, int i) throws IOException {
-        System.out.println("Heapifying: size=" + n + ", index=" + i);
-        int largest = i;
-        int left = 2 * i + 1;
-        int right = 2 * i + 2;
-
-        if (left < n && getKey(left) > getKey(largest)) {
-            largest = left;
-        }
-
-        if (right < n && getKey(right) > getKey(largest)) {
-            largest = right;
-        }
-
-        if (largest != i) {
-            System.out.println("Swapping elements at index " + i + " and " + largest);
-            swap(i, largest);
-            heapify(n, largest);
-        }
+    
+    private int getKey(byte[] data, int index)
+    {
+        int offset = index * 4;
+        return ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
     }
-
-    private int getKey(int index) throws IOException {
-        int bufferIndex = index / 1024;
-        int offset = (index % 1024) * 4;
-
-        System.out.println("Getting key: index=" + index + ", bufferIndex=" + bufferIndex + ", offset=" + offset);
-
-        Buffer buffer = bufferPool.acquireBuffer(bufferIndex);
-        byte[] data = buffer.readBlock();
-
-        if (offset + 1 >= data.length) {
-            throw new IOException("Offset out of bounds: " + offset);
+    
+    private void swap(byte[] data, int i, int j)
+    {
+        int offI = i * 4;
+        int offJ = j * 4;
+        
+        for(int k = 0; k < 4; k++)
+        {
+            byte temp = data[offI + k];
+            data[offI + k] = data[offJ + k];
+            data[offJ + k] = temp;
         }
-
-        int key = ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
-        return key;
+        
     }
-
-    private void swap(int i, int j) throws IOException {
-        int bufferIndexI = i / 1024;
-        int bufferIndexJ = j / 1024;
-        int offsetI = (i % 1024) * 4;
-        int offsetJ = (j % 1024) * 4;
-
-        System.out.println("Swapping: indexI=" + i + ", indexJ=" + j + ", bufferIndexI=" + bufferIndexI + ", bufferIndexJ=" + bufferIndexJ + ", offsetI=" + offsetI + ", offsetJ=" + offsetJ);
-
-        Buffer bufferI = bufferPool.acquireBuffer(bufferIndexI);
-        Buffer bufferJ = bufferPool.acquireBuffer(bufferIndexJ);
-        byte[] dataI = bufferI.readBlock();
-        byte[] dataJ = bufferJ.readBlock();
-
-        // Swap the 4-byte records
-        for (int k = 0; k < 4; k++) {
-            byte temp = dataI[offsetI + k];
-            dataI[offsetI + k] = dataJ[offsetJ + k];
-            dataJ[offsetJ + k] = temp;
-        }
-
-        bufferI.markDirty();
-        bufferJ.markDirty();
-    }
-
+    
     private void writeStatistics(String statFileName, String dataFileName, long elapsedTime) {
         try (PrintStream out = new PrintStream(new FileOutputStream(statFileName, true))) {
             out.println("Data file: " + dataFileName);
-            out.println("Cache hits: " + BufferPool.getCacheHits());
-            out.println("Disk reads: " + BufferPool.getDiskReads());
-            out.println("Disk writes: " + BufferPool.getDiskWrites());
+            out.println("Cache hits: " + pool.getCacheHits());
+            out.println("Disk reads: " + pool.getDiskReads());
+            out.println("Disk writes: " + pool.getDiskWrites());
             out.println("Execution time: " + elapsedTime + " ms");
             out.println();
         } catch (FileNotFoundException e) {
@@ -142,4 +135,13 @@ public class HeapSort {
             e.printStackTrace();
         }
     }
+    
+    private void printData(byte[] data) {
+        for (int i = 0; i < data.length; i += 4) {
+            int key = ((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF);
+            int value = ((data[i + 2] & 0xFF) << 8) | (data[i + 3] & 0xFF);
+            System.out.printf("Key: %c, Value: %c\n", (char)key, (char)value);
+        }
+    }
+
 }
